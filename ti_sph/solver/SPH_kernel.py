@@ -69,6 +69,7 @@ def grad_spline_W_old(r, h, sig):
 
 @ti.func
 def grad_spline_W(r, h, sig_inv_h):
+    #zxc h：核半径；r：邻居的距离；样条函数插值 return scalar
     q = r / h
     tmp = 0.0
     if q > 1:
@@ -304,11 +305,11 @@ class SPH_kernel:
         search_template: ti.template(),
     ):
         dim = ti.static(obj.basic.pos[0].n)
-        for pid in range(obj.info.stack_top[None]):
+        for pid in range(obj.info.stack_top[None]):#zxc 遍历粒子
             located_cell = background_neighb_grid.get_located_cell(
                 pos=obj_pos[pid],
             )
-            for neighb_cell_iter in range(search_template.get_neighb_cell_num()):
+            for neighb_cell_iter in range(search_template.get_neighb_cell_num()):#zxc 遍历cell
                 neighb_cell_index = background_neighb_grid.get_neighb_cell_index(
                     located_cell=located_cell,
                     cell_iter=neighb_cell_iter,

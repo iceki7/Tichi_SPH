@@ -27,7 +27,7 @@ config_discre = ti.static(config.discre)
 config_discre.part_size[None] = 0.06
 config_discre.cs[None] = 220
 config_discre.cfl_factor[None] = 0.5
-config_discre.dt[None] = (
+config_discre.dt[None] = (      #zxc 固定时间步长/CFL
     tsph.fixed_dt(
         config_discre.cs[None],
         config_discre.part_size[None],
@@ -70,6 +70,7 @@ config_neighb = tsph.Neighb_Cell(
 """""" """ OBJECT """ """"""
 # /// --- INIT OBJECT --- ///
 # /// FLUID ///
+#zxc 粒子属性
 fluid_capacity = [
     "node_basic",
     "node_color",
@@ -78,13 +79,13 @@ fluid_capacity = [
     "node_neighb_search",
 ]
 fluid = tsph.Node(
-    dim=config_space.dim[None],
+    dim=config_space.dim[None], #zxc 维度
     id=0,
-    node_num=int(1e5),
-    capacity_list=fluid_capacity,
+    node_num=int(1e5),  
+    capacity_list=fluid_capacity,#zxc 属性列表
 )
-fluid_node_num = fluid.push_cube_with_basic_attr(
-    lb=ti.Vector([-1, -1.1, -1]),
+fluid_node_num = fluid.push_cube_with_basic_attr(   #zxc  cube or box
+    lb=ti.Vector([-1, -1.1, -1]),   #prm 区域限制
     rt=ti.Vector([1, 0.9, 1]),
     span=config_discre.part_size[None],
     size=config_discre.part_size[None],
@@ -126,7 +127,8 @@ search_template = tsph.Neighb_search_template(
     search_range=1,
 )
 
-fluid_neighb_grid = tsph.Neighb_grid(
+fluid_neighb_grid = tsph.Neighb_grid( 
+    #zxc fluid 流体/ bound 边界粒子  领域网格
     obj=fluid,
     dim=config_space.dim[None],
     lb=config_space.lb,
@@ -152,9 +154,9 @@ fluid_df_solver = DFSPH(
     dt=config_discre.dt[None],
     background_neighb_grid=fluid_neighb_grid,
     search_template=search_template,
-    port_sph_psi="implicit_sph.sph_compression_ratio",
-    port_rest_psi="implicit_sph.one",
-    port_X="basic.rest_volume",
+    port_sph_psi="implicit_sph.sph_compression_ratio",  #zxc 密度，Psi
+    port_rest_psi="implicit_sph.one",#zxc
+    port_X="basic.rest_volume",  #zxc
 )
 bound_df_solver = DFSPH(
     obj=bound,
@@ -165,13 +167,11 @@ bound_df_solver = DFSPH(
     port_rest_psi="implicit_sph.one",
     port_X="basic.rest_volume",
 )
-
+#1创建fluid、grid；2 register grid；3 创建solver
 
 # /// --- END OF INIT SOLVER --- ///
 
-# define simulation loop
-# /// --- LOOP --- ///
-def loop():
+def loop():#zxc 逐时间步
     # /// dynamic dt ///
     tsph.cfl_dt(
         obj=fluid,
@@ -182,7 +182,7 @@ def loop():
         output_dt=config_discre.dt,
         output_inv_dt=config_discre.inv_dt,
     )
-
+    #zxc CFL步长，dt=
     fluid_df_solver.update_dt(config_discre.dt[None])
     bound_df_solver.update_dt(config_discre.dt[None])
 
@@ -190,8 +190,21 @@ def loop():
     fluid_neighb_grid.register(obj_pos=fluid.basic.pos)
     bound_neighb_grid.register(obj_pos=bound.basic.pos)
 
-    # /// compute density ///
+      #  node_num 最大粒子数
+      #  stack_top 实际粒子数
+
+
+
+    #zxc from里面包含邻域搜索，并行化。
+    # psi[0~stack top]=0
+    # for 粒子  pid
+    #     for neighborCell 
+    #         for neighborPart
+    #obj_sph_psi psi+=
     fluid_df_solver.clear_psi()
+    ##clear,  deltavor=vor(n),deltavor=vor(n+1), deltavor-=-vor~
+
+    ##
     fluid_df_solver.compute_psi_from(fluid_df_solver)
     fluid_df_solver.compute_psi_from(bound_df_solver)
 
@@ -199,9 +212,9 @@ def loop():
     bound_df_solver.compute_psi_from(fluid_df_solver)
     bound_df_solver.compute_psi_from(bound_df_solver)
 
-    # /// compute alpha ///
+    #alpha=
     fluid_df_solver.clear_alpha()
-    fluid_df_solver.compute_alpha_1_from(fluid_df_solver)
+    fluid_df_solver.compute_alpha_1_from(fluid_df_solver)#what
     fluid_df_solver.compute_alpha_1_from(bound_df_solver)
     fluid_df_solver.compute_alpha_2_from(fluid_df_solver)
     fluid_df_solver.compute_alpha_self()
@@ -210,57 +223,70 @@ def loop():
     bound_df_solver.compute_alpha_2_from(fluid_df_solver)
     bound_df_solver.compute_alpha_self()
 
-    # /// copy vel to vel_adv ///
-    fluid_df_solver.set_vel_adv()
+    #参数 α 仅与当前位置分布相关，因此在迭代开始之前，可以预先计算
 
-    # /// acc to vel_adv ///
+    
+    #vel_adv=vel
+    fluid_df_solver.set_vel_adv()
+    #add 
+    fluid_df_solver.clear_vor()
+    fluid_df_solver.calc_vor(fluid_df_solver)
+
+    #non pressure force
     fluid_df_solver.clear_acc()
+    #acc=
     fluid_df_solver.add_acc(config_sim.gravity)
-    fluid_df_solver.add_acc_from_vis(
+    #acc+=
+    fluid_df_solver.add_acc_from_vis(       # viscosity
         kinetic_vis_coeff=config_sim.kinematic_vis,
         from_solver=fluid_df_solver,
     )
+    #vel_adv+=acc*dt
     fluid_df_solver.update_vel_adv_from_acc()
 
-    # /// --- ITERATION --- ///
+    #zxc pressure Force,更新vel_adv
     fluid_df_solver.comp_iter_count[None] = 0
     while fluid_df_solver.is_compressible():
         fluid_df_solver.comp_iter_count[None] += 1
 
-        # /// compute delta density ///
+
+        #zxc dPsi=psi - rest psi
         fluid_df_solver.compute_delta_psi_self()
         bound_df_solver.compute_delta_psi_self()
 
+        #zxc dPsi+=  
+        #zxc Constant Density Solver step4: calc ρ*
         fluid_df_solver.compute_delta_psi_advection_from(fluid_df_solver)
         fluid_df_solver.compute_delta_psi_advection_from(bound_df_solver)
         bound_df_solver.compute_delta_psi_advection_from(fluid_df_solver)
 
-        fluid_df_solver.ReLU_delta_psi()
+        fluid_df_solver.ReLU_delta_psi()    #zxc psi正值
         bound_df_solver.ReLU_delta_psi()
 
+        #zxc psi error过大则循环;更新vel_adv
+        #zxc comp_avg_ratio=
         fluid_df_solver.check_if_compressible()
         bound_df_solver.check_if_compressible()
 
-        # /// use delta density to update vel_adv ///
+        #  delta density -> pressure force -> vel_adv 
+        #vel_adv+=
         fluid_df_solver.update_vel_adv_from(fluid_df_solver)
         fluid_df_solver.update_vel_adv_from(bound_df_solver)
 
-    # /// --- END OF ITERATION --- ///
 
-    # /// fluid: vel_adv to vel (set vel = vel_adv) ///
+    #zxc vel = vel_adv
     fluid.attr_set_arr(
         obj_attr=fluid_df_solver.obj_vel,
         val_arr=fluid_df_solver.obj_vel_adv,
     )
 
-    # /// fluid: vel to pos ///
+    #zxc pos+=vel*dt
     fluid_df_solver.time_integral_arr(
         obj_frac=fluid_df_solver.obj_vel,
         obj_output_int=fluid_df_solver.obj_pos,
     )
 
 
-# /// --- END OF LOOP --- ///
 
 loop()
 """ GUI """

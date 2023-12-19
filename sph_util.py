@@ -1,4 +1,9 @@
+import numpy as np
+
 from sph_config import *
+
+import scipy.io as scio
+
 
 ######################################## SPH Kernel functions ########################################
 @ti.func
@@ -103,17 +108,68 @@ def read_ply(path):
     verts_array = np.array([[x, y, z] for x, y, z in obj_verts])
     return verts_array
 
-def write_ply(path, frame_num, dim, num, pos):
+def write_ply(path, frame_num, dim, num, pos, vel, needVel=True):
+    # 文件路径，当前帧数，维度，粒子数，位置,速度
+    if(type(pos) is'numpy.ndarray'):
+        print(type(pos))
+        pos = pos.to_numpy()  # taichi don't support slice
+    if(needVel):
+        vel = vel.to_numpy()
+
+
+
     if dim == 3:
-        list_pos = [(pos[i, 0], pos[i, 1], pos[i, 2]) for i in range(num)]
+        if (needVel):
+            list_pos = [(pos[i, 0], pos[i, 1], pos[i, 2], vel[i, 0], vel[i, 1], vel[i, 2]) for i in range(num)]
+        else:
+            list_pos = [(pos[i, 0], pos[i, 1], pos[i, 2]) for i in range(num)]
+        # list_pos = [(pos[i, 0], pos[i, 1], pos[i, 2]) for i in range(num)]
+        # list_vel = [(vel[i, 0], vel[i, 1], vel[i, 2]) for i in range(num)]
     elif dim == 2:
         list_pos = [(pos[i, 0], pos[i, 1], 0) for i in range(num)]
+        list_vel = [(vel[i, 0], vel[i, 1], 0) for i in range(num)]
     else:
         print('write_ply(): dim exceeds default values')
         return
-    np_pos = np.array(list_pos, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    # np_pos = np.array(list_pos, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    # np_vel = np.array(list_vel, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+    # el_pos = PlyElement.describe(np_pos, 'vertex')
+    # el_vel = PlyElement.describe(np_vel, 'velocity')
+    if (needVel):
+        np_pos = np.array(list_pos,
+                          dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4'), ('vx', 'f4'), ('vy', 'f4'), ('vz', 'f4')])
+    else:
+        np_pos = np.array(list_pos, dtype=[('x', 'f4'), ('y', 'f4'), ('z', 'f4')])
+
     el_pos = PlyElement.describe(np_pos, 'vertex')
-    PlyData([el_pos]).write(str(path) + '_' + str(frame_num) + '.ply')
+    PlyData(
+        [el_pos],
+        text=True  # ASCII
+    ).write(str(path) + '_' + str(frame_num) + '.ply')
+
+def writeMatForPINN(filePath,timeArray,velArray,posArray):
+    #将MAT导出为与PINN论文的代码里匹配的格式
+    scio.savemat(filePath, {
+        "U_star":velArray,
+        "t":timeArray,
+        "X_star":posArray
+    })
+
+    data = scio.loadmat(filePath)
+    print('----saved mat-----------')
+
+
+def write_mat(filePath, content,attrName="pos"):
+    # filePath 文件路径（完整文件名，不是文件夹）
+    # content mat内容，可以参考已有的写法
+    # attrName，mat写出是字典，需要指定一个key。
+
+    scio.savemat(filePath, {attrName:content})
+
+    data = scio.loadmat(filePath)
+    print('----saved mat-----------')
+    print(data)
+    #print(content.shape)
 
 
 ############################################### GUI funcs ###############################################
