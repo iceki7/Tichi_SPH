@@ -38,7 +38,7 @@ class Neighb_Cell:
 
     @ti.kernel
     def calculate_neighb_cell_param(self, struct_space: ti.template()):
-        struct_space = ti.static(struct_space)
+        # struct_space = ti.static(struct_space)
         struct_neighb = self
 
         struct_neighb.cell_num_vec[None] = ti.ceil(

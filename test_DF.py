@@ -1,13 +1,76 @@
 # runs DFSPH
-
+from cgitb import reset
+from datetime import datetime
 import re
 import taichi as ti
 import ti_sph as tsph
 import numpy as np
 from plyfile import PlyData, PlyElement
 from ti_sph.func_util import clean_attr_arr, clean_attr_val, clean_attr_mat
+from sph_util import write_ply
+from ti_sph.solver import DFSPH_layer
+from ti_sph.solver.ISPH_Elastic import ISPH_Elastic
 from ti_sph.solver.DFSPH import DFSPH
 import math
+import time
+
+from ti_sph.solver.SPH_kernel import cfl_dt
+
+
+
+
+
+#prm 以下是可调参数
+bWriteMat=0
+bWritePly=1
+
+movePosMax=0.75     # 容器的最大位移量。从-movePosMax 到 movePosMax
+moveVelValue=0.85   # 容器移动速度
+recordTime=3       # 模拟的总时间（秒）
+waitTime=1.3        # 等待时间，模拟时可能不希望容器立即开始移动，可以等待一会儿。
+recordPerSec=10     # 每秒记录帧数。每模拟1/recordPerSec记录一组数据，通常是24。
+
+
+
+
+# 以下是临时变量 不可调
+tid=str(int(time.time()))
+movePosNow=0.0      #当前位移
+moveVel = ti.Vector([0, 0, moveVelValue])
+once=True
+direction=True  #移动方向
+startMove=False #等候waitTime后开始移动
+loopTime=0.0    #一个快照内的时间
+sumTime=0.0     #模拟总时间
+fileNum=0       #当前文件数
+frameCnt = 0  # frame counter
+
+#写mat文件时使用
+timeArray=[]    #   steps×1
+velArray=[]   #    粒子数×3×steps
+posArray=[]    #   粒子数×3×steps
+solidPosArray=[]#   记录固体粒子位置
+
+
+# @ti.kernel
+# def changeBoundVel():
+#     if direction:
+#         for i in range(bound_df_solver.obj.info.stack_top[None]):
+#             bound_df_solver.obj_vel[i] = +moveVel
+#     else:
+#         for i in range(bound_df_solver.obj.info.stack_top[None]):
+#             bound_df_solver.obj_vel[i] = -moveVel
+@ti.kernel
+def moveBox():
+    # todo time integral ( box move )
+    for i in range(bound_df_solver.obj.info.stack_top[None]):  # time_integral_arr
+        bound_df_solver.obj_pos[i] += moveVel * bound_df_solver.dt
+@ti.kernel
+def moveBoxInverse():
+    # todo time integral ( box move )
+
+    for i in range(bound_df_solver.obj.info.stack_top[None]):  # time_integral_arr
+        bound_df_solver.obj_pos[i] -= moveVel * bound_df_solver.dt
 
 ti.init(arch=ti.cuda)
 
@@ -19,12 +82,12 @@ config = tsph.Config(dim=3, capacity_list=config_capacity)
 # /// space ///
 config_space = ti.static(config.space)
 config_space.dim[None] = 3
-config_space.lb[None] = [-8, -8, -8]
-config_space.rt[None] = [8, 8, 8]
+config_space.lb[None] = [-2, -2.5, -4]  #prm 整个模拟空间所占的范围
+config_space.rt[None] = [2, 4.5, 4]     #lb是左侧底部坐标，rt是右侧顶部坐标。
 
 # /// discretization ///
 config_discre = ti.static(config.discre)
-config_discre.part_size[None] = 0.06
+config_discre.part_size[None] = 0.14  # prm 粒子半径，可用 part_size^3 * 粒子数 =常数   估算
 config_discre.cs[None] = 220
 config_discre.cfl_factor[None] = 0.5
 config_discre.dt[None] = (      #zxc 固定时间步长/CFL
@@ -90,7 +153,7 @@ fluid_node_num = fluid.push_cube_with_basic_attr(   #zxc  cube or box
     span=config_discre.part_size[None],
     size=config_discre.part_size[None],
     rest_density=1000,
-    color=ti.Vector([0, 1, 1]),
+    color=ti.Vector([0, 0.8, 0.3]),
 )
 
 
@@ -169,9 +232,20 @@ bound_df_solver = DFSPH(
 )
 #1创建fluid、grid；2 register grid；3 创建solver
 
+# solidPosArray.append(bound_df_solver.obj_pos.to_numpy()[0:bound_df_solver.obj.info.stack_top[None], :])
+# sph_util.write_mat("./output-" + str(tid) + "/" + "solidPos.mat", solidPosArray, "pos")
 # /// --- END OF INIT SOLVER --- ///
-
 def loop():#zxc 逐时间步
+    global frameCnt
+    global loopTime
+    global fileNum
+    global recordPerSec
+    global direction
+    global startMove
+    global sumTime
+    global waitTime
+    global movePosNow
+    global movePosMax
     # /// dynamic dt ///
     tsph.cfl_dt(
         obj=fluid,
@@ -190,6 +264,8 @@ def loop():#zxc 逐时间步
     fluid_neighb_grid.register(obj_pos=fluid.basic.pos)
     bound_neighb_grid.register(obj_pos=bound.basic.pos)
 
+
+    # zxc
       #  node_num 最大粒子数
       #  stack_top 实际粒子数
 
@@ -228,9 +304,6 @@ def loop():#zxc 逐时间步
     
     #vel_adv=vel
     fluid_df_solver.set_vel_adv()
-    #add 
-    fluid_df_solver.clear_vor()
-    fluid_df_solver.calc_vor(fluid_df_solver)
 
     #non pressure force
     fluid_df_solver.clear_acc()
@@ -288,6 +361,89 @@ def loop():#zxc 逐时间步
 
 
 
+    #code2   移动容器
+    #↓ move container ↓
+
+    #如果容器移动到了边界，修改direction
+    # if(movePosNow + moveVelValue * bound_df_solver.dt>movePosMax):
+    #     direction=False
+
+    # elif(movePosNow - moveVelValue * bound_df_solver.dt<-movePosMax):
+    #     direction=True
+
+
+    # #移动容器
+    # if(startMove==False):
+    #     if(sumTime >= waitTime):
+    #         startMove=True
+    # else:
+    #     if(direction==True):
+    #         movePosNow += moveVelValue * bound_df_solver.dt
+    #         #print("pNow="+str(movePosNow))
+    #         moveBox()
+    #     else:
+    #         movePosNow -= moveVelValue * bound_df_solver.dt
+    #         #print("pNow="+str(movePosNow))
+    #         moveBoxInverse()
+    #code2 end
+
+
+    loopTime+=fluid_df_solver.dt        #累加一个快照内的时间
+    sumTime+=fluid_df_solver.dt         #累加模拟总时间
+    #print("sumTime="+str(sumTime))
+    #print("dt="+str(fluid_df_solver.dt))
+
+
+
+    if(loopTime>(1/recordPerSec)):  #如果到了需要记录快照的条件
+        fileNum+=1
+        loopTime=0.0
+        #print("file "+str(fileNum)+" done.")
+        global posArray,velArray,timeArray
+        #print('posArray=')
+        #print(posArray)
+
+        #code3  写mat时才用到
+        if(bWriteMat):
+            timeArray.append(sumTime)  # fluid_df_solver.obj_pos.to_numpy().tolist()
+            posArray.append(fluid_df_solver.obj_pos.to_numpy()[0:fluid_df_solver.obj.info.stack_top[None], :])
+            velArray.append(fluid_df_solver.obj_vel.to_numpy()[0:fluid_df_solver.obj.info.stack_top[None], :])
+            #print(posArray[0].shape)
+            #posArray = np.array(posArray)
+            #print(posArray)
+        #code3 end
+
+
+
+        #code4          #写PLY信息
+        if(bWritePly):
+            write_ply(
+                path="./"+str(tid)+"/fluid/", #PLY所放置的目录
+                frame_num=fileNum,                                  #文件编号，通常不用管
+                dim=3,                                              #维度
+                num=fluid_df_solver.obj.info.stack_top[None],       #写流体粒子
+                pos=fluid_df_solver.obj_pos,
+                vel=fluid_df_solver.obj_vel,
+                needVel=True)                                       #是否要写速度
+
+        #code4 end
+
+
+        if(fileNum>=recordTime*recordPerSec): #如果写出的文件数目达到要求了，结束模拟，通常在写出ply时使用;
+            exit(0)
+        if(sumTime>=recordTime):
+            if(bWriteMat):                #如果模拟时间达到要求了，结束模拟，通常在写出mat时使用;
+                posArray=np.array(posArray)
+                velArray=np.array(velArray)
+                timeArray=np.array(timeArray)
+                sph_util.write_mat("./output-" + str(tid) + "/" + "time.mat", timeArray, "time")
+                sph_util.write_mat("./output-" + str(tid) + "/" + "pos.mat", posArray, "pos")
+                sph_util.write_mat("./output-" + str(tid) + "/" + "vel.mat",velArray, "vel")
+
+            exit(0)
+
+
+# /// --- END OF LOOP --- ///
 loop()
 """ GUI """
 gui = tsph.Gui(config_gui)
@@ -296,6 +452,7 @@ loop_count = 0
 while gui.window.running:
     if gui.op_system_run:
         loop()
+        frameCnt += 1
         loop_count += 1
         print(loop_count)
     gui.monitor_listen()

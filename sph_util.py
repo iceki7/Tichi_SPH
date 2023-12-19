@@ -1,4 +1,5 @@
 import numpy as np
+import os
 
 from sph_config import *
 
@@ -110,9 +111,11 @@ def read_ply(path):
 
 def write_ply(path, frame_num, dim, num, pos, vel, needVel=True):
     # 文件路径，当前帧数，维度，粒子数，位置,速度
-    if(type(pos) is'numpy.ndarray'):
-        print(type(pos))
-        pos = pos.to_numpy()  # taichi don't support slice
+
+    if not os.path.exists(path):
+        os.makedirs(path)
+
+    pos = pos.to_numpy()  # taichi don't support slice
     if(needVel):
         vel = vel.to_numpy()
 
@@ -145,7 +148,7 @@ def write_ply(path, frame_num, dim, num, pos, vel, needVel=True):
     PlyData(
         [el_pos],
         text=True  # ASCII
-    ).write(str(path) + '_' + str(frame_num) + '.ply')
+    ).write(str(path) + 'f-' + str(frame_num) + '.ply')
 
 def writeMatForPINN(filePath,timeArray,velArray,posArray):
     #将MAT导出为与PINN论文的代码里匹配的格式
