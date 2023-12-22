@@ -148,7 +148,7 @@ def write_ply(path, frame_num, dim, num, pos, vel, needVel=True):
     PlyData(
         [el_pos],
         text=True  # ASCII
-    ).write(str(path) + 'f-' + str(frame_num) + '.ply')
+    ).write(str(path) + 'frame_' + str(frame_num) + '.ply')
 
 def writeMatForPINN(filePath,timeArray,velArray,posArray):
     #将MAT导出为与PINN论文的代码里匹配的格式

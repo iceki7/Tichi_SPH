@@ -403,7 +403,7 @@ def loop():#zxc 逐时间步
         #print('posArray=')
         #print(posArray)
 
-        #code3  写mat时才用到
+
         if(bWriteMat):
             timeArray.append(sumTime)  # fluid_df_solver.obj_pos.to_numpy().tolist()
             posArray.append(fluid_df_solver.obj_pos.to_numpy()[0:fluid_df_solver.obj.info.stack_top[None], :])
@@ -411,11 +411,11 @@ def loop():#zxc 逐时间步
             #print(posArray[0].shape)
             #posArray = np.array(posArray)
             #print(posArray)
-        #code3 end
 
 
 
-        #code4          #写PLY信息
+
+
         if(bWritePly):
             write_ply(
                 path="./"+str(tid)+"/fluid/", #PLY所放置的目录
@@ -424,9 +424,8 @@ def loop():#zxc 逐时间步
                 num=fluid_df_solver.obj.info.stack_top[None],       #写流体粒子
                 pos=fluid_df_solver.obj_pos,
                 vel=fluid_df_solver.obj_vel,
-                needVel=True)                                       #是否要写速度
+                needVel=False)                                       #是否要写速度
 
-        #code4 end
 
 
         if(fileNum>=recordTime*recordPerSec): #如果写出的文件数目达到要求了，结束模拟，通常在写出ply时使用;
